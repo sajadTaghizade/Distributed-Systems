@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="/static/style.css">
+    <meta charset="UTF-8">
+    <title>Distributed System Login</title>
+</head>
+<body style="font-family: Arial; margin: 50px;">
+    <h2>Login to Distributed System</h2>
+    
+    {{if .Error}} <p style="color:red; font-weight:bold;">{{.Error}}</p> {{end}}
+    
+    <form action="/login" method="post">
+        <label>Username:</label><br>
+        <input type="text" name="username" required><br><br>
+        <label>Password:</label><br>
+        <input type="password" name="password" required><br><br>
+        <input type="submit" value="Login">
+    </form>
+</body>
+</html>
