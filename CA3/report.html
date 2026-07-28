@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>گزارش تمرین سوم — Replicated Key-Value Store</title>
+<style>
+@font-face { font-family:'Vazirmatn'; src:url(data:font/ttf;base64,@@FONT400@@) format('truetype'); font-weight:400; font-style:normal; }
+@font-face { font-family:'Vazirmatn'; src:url(data:font/ttf;base64,@@FONT700@@) format('truetype'); font-weight:700; font-style:normal; }
+@page { size:A4; margin:1.8cm 1.8cm 2cm 1.8cm; }
+* { box-sizing:border-box; }
+html { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+body { font-family:'Vazirmatn',Tahoma,sans-serif; direction:rtl; text-align:justify;
+       line-height:1.95; font-size:11.5pt; color:#1b1b1b; margin:0; }
+h1,h2,h3 { font-weight:700; line-height:1.5; color:#0f3d63; }
+h2 { font-size:15.5pt; border-bottom:2px solid #cfe0ee; padding-bottom:5px; margin-top:1.7em; page-break-after:avoid; }
+h3 { font-size:12.5pt; color:#1f6fb2; margin-top:1.2em; margin-bottom:.3em; page-break-after:avoid; }
+p { margin:.5em 0; }
+.ltr,code { direction:ltr; unicode-bidi:isolate; font-family:Consolas,'Courier New',monospace; }
+code { background:#f3f5f8; padding:1px 5px; border-radius:4px; font-size:10pt; color:#b03a2e; }
+pre { direction:ltr; text-align:left; background:#0c1021; color:#d6dae6; padding:12px 14px;
+      border-radius:8px; font-family:Consolas,monospace; font-size:9pt; line-height:1.45;
+      white-space:pre-wrap; word-break:break-word; page-break-inside:avoid; }
+table { width:100%; border-collapse:collapse; margin:1em 0; font-size:10pt; page-break-inside:avoid; }
+th,td { border:1px solid #b9c7d4; padding:6px 8px; text-align:center; vertical-align:middle; }
+th { background:#1f6fb2; color:#fff; font-weight:700; }
+tr:nth-child(even) td { background:#f2f6fa; }
+figure { margin:1.1em 0; text-align:center; page-break-inside:avoid; }
+figure img { max-width:100%; border:1px solid #dde4ea; border-radius:6px; }
+figcaption { font-size:9.5pt; color:#555; margin-top:6px; }
+ul,ol { padding-right:1.5em; margin:.5em 0; } li { margin:.32em 0; }
+.box { background:#f6f9fc; border:1px solid #d6e2ec; border-right:4px solid #1f6fb2;
+       border-radius:6px; padding:6px 14px; margin:1em 0; }
+.note { background:#fff8e6; border:1px solid #f0e3b8; border-right:4px solid #e0a800; }
+.cover { height:25.2cm; display:flex; flex-direction:column; align-items:center;
+         justify-content:center; text-align:center; page-break-after:always; }
+.cover .uni { font-size:17pt; font-weight:700; margin:.2em 0; color:#111; }
+.cover .fac { font-size:13.5pt; margin-bottom:2.2em; color:#333; }
+.cover .rule { width:75%; border-top:1px solid #999; margin:1.1em 0; }
+.cover .course { font-size:16pt; font-weight:700; }
+.cover .title { font-size:14pt; font-weight:700; color:#0f3d63; margin-top:.3em; }
+.cover .role { font-weight:700; margin-top:1.0em; font-size:12.5pt; }
+.cover .name { color:#1f6fb2; font-size:12pt; }
+.cover .stud { margin-top:1.6em; font-size:12pt; line-height: 2.2; }
+.cover .term { margin-top:1.8em; font-size:12.5pt; }
+.toc { page-break-after:always; }
+.toc h2 { border:none; }
+.toc ol { font-size:12pt; line-height:2.1; }
+.partbreak { page-break-before:always; }
+.q { font-weight:700; color:#0f3d63; }
+small.cap { display:block; direction:ltr; text-align:left; color:#777; font-size:8.5pt; margin-top:2px; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="uni">دانشگاه تهران</div>
+  <div class="fac">دانشکده مهندسی برق و کامپیوتر</div>
+  <div class="rule"></div>
+  <div class="course">درس مبانی رایانش توزیع‌شده</div>
+  <div class="title">تمرین سوم (۳): پیاده‌سازی یک Replicated Key-Value Store</div>
+  <div class="rule"></div>
+  <div class="role">استاد درس</div>
+  <div class="name">محمدرضا شکورنیا</div>
+  <div class="role">دستیار ارشد</div>
+  <div class="name">پویا جمشیدی</div>
+  <div class="role">دستیاران مسئول تمرین</div>
+  <div class="name">مبینا حقی‌زاده — محمدمهدی ابراهیم سلطانی</div>
+  <div class="stud">
+    نام و نام خانوادگی: محمدمهدی یاری — سجاد تقی‌زاده<br>
+    شماره دانشجویی: 810102532 — 810102425
+  </div>
+  <div class="term">بهار ۱۴۰۵</div>
+</section>
+
+<section class="toc">
+  <h2>فهرست مطالب</h2>
+  <ol>
+    <li>بخش اول: پاسخ به سوالات تئوری</li>
+    <li>بخش دوم: معماری و پیاده‌سازی سیستم</li>
+    <li>نحوه اجرای replicaها و client</li>
+    <li>بخش سوم: نسخه‌گذاری (Versioning) و حل تعارض (Conflict Resolution)</li>
+    <li>بخش چهارم: سناریوهای آزمایش و نتایج</li>
+    <li>جدول متریک‌ها و تحلیل کارایی</li>
+    <li>مقایسه‌ی Eventual و Strong و تحلیل Trade-off</li>
+    <li>مشکلات و محدودیت‌های پیاده‌سازی</li>
+    <li>جمع‌بندی</li>
+  </ol>
+</section>
+
+<h2>۱. بخش اول: پاسخ به سوالات تئوری</h2>
+
+<h3>۱.۱ چرا داده‌ها در سیستم‌های توزیع‌شده تکثیر (Replicate) می‌شوند؟</h3>
+<p>
+تکثیر داده یعنی نگه‌داری چند نسخه از یک داده روی گره‌های مختلف. مهم‌ترین دلایل آن عبارت‌اند از:
+</p>
+<ul>
+  <li><b>افزایش دسترس‌پذیری (Availability):</b> اگر یک گره از کار بیفتد، گره‌های دیگر می‌توانند به درخواست‌ها پاسخ دهند و سرویس قطع نمی‌شود.</li>
+  <li><b>تحمل خطا (Fault Tolerance):</b> با از دست رفتن یک یا چند نسخه، داده از بین نمی‌رود؛ نسخه‌های سالم آن را حفظ می‌کنند.</li>
+  <li><b>افزایش کارایی و کاهش تاخیر (Performance &amp; Latency):</b> خواندن می‌تواند از نزدیک‌ترین نسخه یا نسخه‌ی کم‌بارتر انجام شود، و بار خواندن بین چند نسخه پخش می‌شود.</li>
+  <li><b>مقیاس‌پذیری خواندن (Read Scalability):</b> چند نسخه به‌طور موازی به خواندن‌ها پاسخ می‌دهند و گلوگاه یک گره‌ی واحد از بین می‌رود.</li>
+  <li><b>نزدیکی جغرافیایی:</b> قرار دادن نسخه‌ها نزدیک کاربران، تاخیر شبکه را کاهش می‌دهد.</li>
+</ul>
+
+<h3>۱.۲ تفاوت تکثیر برای «افزایش کارایی» و تکثیر برای «تحمل خطا» چیست؟</h3>
+<p>
+هرچند هر دو از یک مکانیزم (نگه‌داری چند نسخه) استفاده می‌کنند، هدف و طراحی آن‌ها متفاوت است:
+</p>
+<ul>
+  <li><b>تکثیر برای کارایی:</b> هدف، توزیع بار و کاهش تاخیر است. تعداد نسخه‌ها بر اساس حجم ترافیک تعیین می‌شود، خواندن معمولاً از نسخه‌ی محلی انجام می‌گیرد و اغلب سازگاری ضعیف‌تری (مانند <span class="ltr">eventual</span>) پذیرفته می‌شود تا سرعت بالا بماند.</li>
+  <li><b>تکثیر برای تحمل خطا:</b> هدف، بقای داده و سرویس در برابر خرابی است. تعداد نسخه‌ها بر اساس تعداد خطای قابل‌تحمل انتخاب می‌شود (برای تحمل <span class="ltr">f</span> خرابی هم‌زمان معمولاً به <span class="ltr">2f+1</span> نسخه نیاز است تا اکثریت حفظ شود) و تاکید بر هماهنگی و تاییدِ اکثریت (Quorum) است، حتی به قیمت تاخیر بیشتر.</li>
+</ul>
+<p>در عمل این دو هدف می‌توانند هم‌پوشانی داشته باشند؛ سیستم‌های واقعی اغلب هر دو را هم‌زمان دنبال می‌کنند.</p>
+
+<h3>۱.۳ مشکل اصلی تکثیر از نظر سازگاری (Consistency) چیست؟</h3>
+<p>
+وقتی چند نسخه از یک داده وجود دارد، هر به‌روزرسانی باید به همه‌ی نسخه‌ها برسد. در بازه‌ی زمانی میان اعمالِ تغییر روی نسخه‌ی اول و رسیدن آن به بقیه، نسخه‌ها <b>ناسازگار</b> هستند و خواندن از نسخه‌های مختلف ممکن است مقادیر متفاوت یا قدیمی (<span class="ltr">stale</span>) برگرداند. حفظ سازگاری کامل و آنی نیازمند هماهنگی همزمان میان نسخه‌هاست که <b>تاخیر را افزایش</b> و <b>دسترس‌پذیری را کاهش</b> می‌دهد. این همان تنش بنیادین میان سازگاری از یک سو و کارایی/دسترس‌پذیری از سوی دیگر است.
+</p>
+
+<h3>۱.۴ تفاوت Strong Consistency و Eventual Consistency چیست؟</h3>
+<ul>
+  <li><b>Strong Consistency:</b> پس از هر نوشتنِ موفق، هر خواندن بعدی (از هر نسخه‌ای) جدیدترین مقدار را می‌بیند؛ گویی سیستم یک نسخه‌ی واحد دارد. این تضمین نیازمند هماهنگی همزمان (مثلاً تاییدِ اکثریت پیش از موفق اعلام کردن نوشتن) است و در نتیجه تاخیر بیشتر و دسترس‌پذیری کمتری در زمان خطا دارد.</li>
+  <li><b>Eventual Consistency:</b> نوشتن سریع روی یک نسخه اعمال و به‌صورت غیرهمزمان منتشر می‌شود. ممکن است برای مدتی کوتاه مقادیر قدیمی خوانده شوند، اما در صورت توقف نوشتن‌های جدید، «در نهایت» همه‌ی نسخه‌ها به مقدار یکسان همگرا می‌شوند. مزیت آن تاخیر کم و دسترس‌پذیری بالاست.</li>
+</ul>
+<p>هر دو مدل در این پروژه پیاده‌سازی و در بخش چهارم به‌صورت عملی مقایسه شده‌اند.</p>
+
+<h3>۱.۵ مفهوم Read-Your-Writes Consistency چیست؟</h3>
+<p>
+این یک تضمین <b>مشتری‌محور (Client-Centric)</b> است: هر کلاینت همواره اثر نوشتن‌های قبلیِ <b>خودش</b> را در خواندن‌های بعدی می‌بیند، حتی اگر این تغییر هنوز برای سایر کلاینت‌ها قابل‌مشاهده نباشد. مثال: کاربری که پروفایلش را ویرایش می‌کند باید بلافاصله نسخه‌ی ویرایش‌شده را ببیند، نه نسخه‌ی قدیمی را. راه‌های پیاده‌سازی: هدایت خواندن‌های کلاینت به همان نسخه‌ای که روی آن نوشته است، یا نگه‌داری شناسه/نسخه‌ی آخرین نوشته‌ی کلاینت و خواندن از نسخه‌ای که دست‌کم آن نسخه را دارد. در پیاده‌سازی ما، اگر کلاینت پس از یک نوشتن از همان <span class="ltr">replica</span> بخواند، این تضمین برقرار است.
+</p>
+
+<h3>۱.۶ مفهوم Monotonic Reads چیست؟</h3>
+<p>
+این نیز یک تضمین مشتری‌محور است: اگر یک کلاینت یک‌بار مقداری را خواند، خواندن‌های بعدیِ او هرگز مقداری <b>قدیمی‌تر</b> از آن را نمی‌بینند؛ یعنی «زمان به عقب برنمی‌گردد». مثال: اگر کاربر پیامی را در صندوق ورودی دید، با تازه‌سازی صفحه نباید آن پیام ناپدید شود. این تضمین معمولاً با مطمئن‌شدن از این‌که خواندن‌های بعدی از نسخه‌ای انجام می‌شوند که دست‌کم به‌اندازه‌ی خواندن قبلی به‌روز است، برآورده می‌شود.
+</p>
+
+<h3>۱.۷ چرا نمی‌توان همزمان همیشه بیشترین Availability و Partition Tolerance (و سازگاری) را داشت؟ (قضیه‌ی CAP)</h3>
+<p>
+بر اساس قضیه‌ی <b>CAP</b>، یک سیستم توزیع‌شده در حضور <b>بخش‌بندی شبکه (Partition)</b> نمی‌تواند هم‌زمان <b>سازگاری (C)</b> و <b>دسترس‌پذیری (A)</b> کامل را تضمین کند و باید یکی را فدای دیگری کند. استدلال: اگر شبکه بخش‌بندی شود و سیستم بخواهد به همه‌ی درخواست‌ها پاسخ دهد (A)، نمی‌تواند تضمین کند همه‌ی نسخه‌ها جدیدترین مقدار را دارند (نقض C)؛ و اگر بخواهد C را حفظ کند، باید در زمان بخش‌بندی به برخی درخواست‌ها پاسخ ندهد یا خطا برگرداند (نقض A). چون در سیستم‌های توزیع‌شده شبکه قابل‌اعتماد نیست و بخش‌بندی اجتناب‌ناپذیر است، عملاً انتخاب میان <b>CP</b> و <b>AP</b> است.
+</p>
+<div class="box">
+<b>ربط به این پروژه:</b> مدل <span class="ltr">Strong</span> ما رفتاری <b>CP</b>گونه دارد (وقتی اکثریت در دسترس نیست، نوشتن را رد می‌کند تا سازگاری حفظ شود) و مدل <span class="ltr">Eventual</span> رفتاری <b>AP</b>گونه دارد (نوشتن را همیشه می‌پذیرد و سازگاری را به آینده موکول می‌کند). این دو رفتار در «سناریوی ۲» به‌صورت عملی دیده می‌شوند.
+</div>
+<p>
+<b>تحلیل Trade-off:</b> سازگاری قوی‌تر ⟵ تاخیر بیشتر و دسترس‌پذیری کمتر هنگام خطا؛ دسترس‌پذیری/کاراییِ بیشتر ⟵ سازگاری ضعیف‌تر و احتمال خواندن‌های قدیمی. انتخاب درست به نیاز کاربرد بستگی دارد (برای مثال تراکنش بانکی به سمت سازگاری، و شمارنده‌ی لایک به سمت دسترس‌پذیری متمایل است).
+</p>
+
+<h2 class="partbreak">۲. بخش دوم: معماری و پیاده‌سازی سیستم</h2>
+<p>
+سیستم به‌صورت <b>کلاینت–سرور</b> و با سه <span class="ltr">replica</span>ی <b>کاملاً مستقل</b> پیاده‌سازی شده است. هر <span class="ltr">replica</span> یک پراسس جداگانه (یک سرویس <span class="ltr">HTTP</span>) است که داده‌های خود را به‌صورت محلی در یک <span class="ltr">map</span> در حافظه نگه می‌دارد و دسترسی هم‌زمان به آن با یک قفل <span class="ltr">sync.RWMutex</span> محافظت می‌شود. ارتباط میان کلاینت و <span class="ltr">replica</span>ها و نیز میان خودِ <span class="ltr">replica</span>ها از طریق <b>شبکه</b> و با پروتکل <span class="ltr">HTTP</span> و بدنه‌ی <span class="ltr">JSON</span> انجام می‌شود. زبان پیاده‌سازی <span class="ltr">Go</span> است.
+</p>
+
+<figure>
+  <img src="images/architecture.png" alt="architecture">
+  <figcaption>شکل ۱: معماری سیستم — یک کلاینت و سه replicaی مستقل که از طریق HTTP با هم ارتباط دارند.</figcaption>
+</figure>
+
+<h3>۲.۱ ساختار داده</h3>
+<p>برای هر کلید، یک مقدارِ نسخه‌دار با ساختار پیشنهادی صورت تمرین نگه‌داری می‌شود:</p>
+<pre>{ "key": "x", "value": "10", "version": 3, "updated_by": "replica1" }</pre>
+
+<h3>۲.۲ واسط برنامه‌نویسی (API) هر replica</h3>
+<ul>
+  <li><code>POST /put</code> — نوشتن از سوی کلاینت؛ بدنه شامل <code>key</code>، <code>value</code> و <code>consistency</code> (برابر <span class="ltr">eventual</span> یا <span class="ltr">strong</span>).</li>
+  <li><code>GET /get?key=...&consistency=...</code> — خواندن مقدار. در حالت <span class="ltr">eventual</span> مستقیماً از نسخه‌ی محلی خوانده می‌شود. اما در حالت <span class="ltr">strong</span> از مکانیزم هماهنگ‌شده‌ی <b>Read Quorum</b> بهره می‌برد.</li>
+  <li><code>POST /internal/replicate</code> — درگاه داخلی برای دریافت و اعمالِ مقداری که یک <span class="ltr">replica</span>ی دیگر منتشر کرده است.</li>
+</ul>
+
+<h3>۲.۳ پیاده‌سازی PUT و GET و مکانیزم تکثیر</h3>
+<p>
+در عملیات <code>PUT</code>، مقدار ابتدا به‌صورت محلی اعمال و نسخه‌ی کلید یک واحد افزایش می‌یابد و <code>updated_by</code> برابر شناسه‌ی همان <span class="ltr">replica</span> قرار می‌گیرد؛ سپس بسته به مدل سازگاری، تکثیر انجام می‌شود. در عملیات <code>GET</code> وابسته به پارامتر سازگاری، سیستم تصمیم به استفاده از حافظه محلی یا پرس‌وجو از اکثریت همتایان می‌گیرد. تکثیر با ارسال یک درخواست <code>POST</code> به درگاه <code>/internal/replicate</code> هر همتا انجام می‌گیرد و برای شبیه‌سازی تاخیر شبکه، یک تاخیر مصنوعی قابل‌تنظیم (پرچم <code>-delay</code>) پیش از ارسالِ هر پیام تکثیر اعمال می‌شود.
+</p>
+
+<div class="box">
+<h3 style="margin-top:0">۲.۴ مدل اول: Eventual Consistency</h3>
+عملیات <code>PUT</code> روی <span class="ltr">replica</span>ی دریافت‌کننده اعمال و <b>بلافاصله</b> موفق اعلام می‌شود؛ آن‌گاه به‌صورت <b>غیرهمزمان</b> (در قالب <span class="ltr">goroutine</span>) به همتایان منتشر می‌گردد. بنابراین ممکن است بلافاصله پس از نوشتن، خواندن از <span class="ltr">replica</span>ی دیگر مقدار قدیمی برگرداند، اما پس از مدتی همه‌ی نسخه‌ها همگرا می‌شوند.
+</div>
+<div class="box">
+<h3 style="margin-top:0">۲.۵ مدل دوم: Strong Consistency (ساده‌شده)</h3>
+عملیات <code>PUT</code> فقط زمانی موفق محسوب می‌شود که <b>اکثریتِ</b> <span class="ltr">replica</span>ها (شاملِ خودِ گره) مقدار را تایید کنند. اندازه‌ی اکثریت به‌صورت پویا برابر <span class="ltr">(N/2)+1</span> محاسبه می‌شود که برای سه <span class="ltr">replica</span> برابر <b>۲</b> است. اگر اکثریت در دسترس نباشد، نوشتن با خطای <span class="ltr">HTTP 500</span> شکست می‌خورد. تکثیر در این مدل <b>همزمان (synchronous)</b> است و کلاینت تا تاییدِ اکثریت منتظر می‌ماند. همچنین برای عملیات خواندن (GET) در این مدل، مکانیزم <b>Read Quorum</b> پیاده‌سازی شده است تا همیشه سیستم جدیدترین نسخه را با پرسش از اکثریت به کلاینت برگرداند و از بازگشت مقادیر ناسازگار (Stale Read) جلوگیری شود.
+</div>
+
+<h2>۳. نحوه‌ی اجرای replicaها و client</h2>
+<p>ابتدا برنامه‌ها ساخته می‌شوند (نیازمند <span class="ltr">Go 1.21+</span>):</p>
+<pre>go build -o bin/replica.exe ./replica
+go build -o bin/client.exe  ./client</pre>
+<p>سپس هر سه <span class="ltr">replica</span> (هر کدام در یک ترمینال جداگانه و به‌عنوان یک پراسس مستقل) اجرا می‌شوند. توپولوژی از فایل‌های <span class="ltr">config</span> خوانده می‌شود:</p>
+<pre>go run ./replica -config configs/replica1.json    # replica1 on :8081
+go run ./replica -config configs/replica2.json    # replica2 on :8082
+go run ./replica -config configs/replica3.json    # replica3 on :8083
+# افزودن -delay=&lt;ms&gt; برای شبیه‌سازی تاخیر شبکه</pre>
+<p>اجرای کلاینت برای نوشتن و خواندن:</p>
+<pre>go run ./client -action=put -node=http://localhost:8081 -key=x -value=10 -consistency=strong
+go run ./client -action=get -node=http://localhost:8082 -key=x</pre>
+<p>نمونه‌ی واقعیِ یک جلسه‌ی کاری (خروجی واقعیِ برنامه)، که تفاوت نوشتن <span class="ltr">strong</span> (بلافاصله سازگار) و <span class="ltr">eventual</span> (ناسازگاری موقت تا همگرایی) را نشان می‌دهد:</p>
+<figure>
+  <img src="images/console.png" alt="console">
+  <figcaption>شکل ۲: خروجی واقعیِ اجرای سیستم — نوشتن strong روی replica1 و مشاهده‌ی فوریِ آن از replica2، در مقابل نوشتن eventual و خواندن stale از replica2 که پس از حدود یک ثانیه همگرا می‌شود.</figcaption>
+</figure>
+
+<h2 class="partbreak">۴. بخش سوم: نسخه‌گذاری و حل تعارض</h2>
+<h3>۴.۱ سیاست نسخه‌گذاری (Versioning)</h3>
+<p>
+برای هر کلید یک شماره‌ی <code>version</code> نگه‌داری می‌شود. هر بار که مقدار یک کلید تغییر می‌کند، نسخه‌ی آن یک واحد افزایش می‌یابد و شناسه‌ی نویسنده در <code>updated_by</code> ثبت می‌شود. این فراداده مبنای تشخیص «جدیدتر بودن» یک مقدار و حل تعارض است.
+</p>
+<h3>۴.۲ سیاست حل تعارض: Last-Write-Wins</h3>
+<p>هنگام دریافت یک مقدار از همتا (در <code>/internal/replicate</code>)، قانون پذیرش به این صورت است:</p>
+<ul>
+  <li>اگر کلید جدید باشد، یا نسخه‌ی واردشده <b>بزرگ‌تر</b> از نسخه‌ی فعلی باشد ⟵ پذیرفته می‌شود.</li>
+  <li>اگر نسخه‌ها <b>برابر</b> ولی مقادیر متفاوت باشند (تعارض همزمان) ⟵ مقداری که <code>updated_by</code> بزرگ‌تری (به ترتیب الفبایی) دارد برنده می‌شود.</li>
+  <li>در غیر این صورت (نسخه‌ی واردشده قدیمی‌تر است) ⟵ رد می‌شود.</li>
+</ul>
+<div class="box">
+<b>چرا این سیاست انتخاب شد؟</b> این قانون <b>قطعی (deterministic)</b> است و روی همه‌ی گره‌ها به نتیجه‌ی یکسان می‌رسد؛ به ساعت هماهنگ نیاز ندارد؛ ساده و کم‌هزینه است؛ و دو نیازمندیِ کلیدی صورت تمرین را برآورده می‌کند: (۱) یک مقدار جدیدتر هرگز با مقدار قدیمی‌تر بازنویسی نمی‌شود، و (۲) دو نوشتن همزمان با نسخه‌ی برابر، روی همه‌ی نسخه‌ها به یک برنده‌ی یکسان همگرا می‌شوند. هزینه‌ی آن این است که در تعارض همزمان، یکی از دو نوشته کنار گذاشته می‌شود (پدیده‌ی <span class="ltr">lost update</span>) که در بخش محدودیت‌ها به آن اشاره شده است.
+</div>
+
+<h2 class="partbreak">۵. بخش چهارم: سناریوهای آزمایش و نتایج</h2>
+<p>هر چهار سناریوی خواسته‌شده اجرا و خروجی‌های واقعیِ آن‌ها در پوشه‌ی <code>results/</code> ذخیره شده است. خلاصه‌ی نتایج:</p>
+
+<h3>۵.۱ سناریوی ۱ — مشاهده‌ی ناسازگاری موقت (Eventual)</h3>
+<p>
+برای آن‌که پنجره‌ی ناسازگاری (که روی <span class="ltr">localhost</span> زیرِ یک میلی‌ثانیه است) قابل‌مشاهده شود، تاخیر تکثیر روی <span class="ltr">1000ms</span> تنظیم شد. مقدار <code>x=10</code> با مدل <span class="ltr">eventual</span> روی <span class="ltr">replica1</span> نوشته شد و بلافاصله از <span class="ltr">replica2</span> خوانده شد:
+</p>
+<ul>
+  <li>خواندنِ فوری از <span class="ltr">replica2</span>: نتیجه <code>HTTP 404 (key not found)</code> ⟵ یک <b>خواندن stale</b> (تغییر هنوز نرسیده بود).</li>
+  <li>وضعیت بلافاصله پس از نوشتن: <span class="ltr">replica1=10(v1), replica2=&lt;none&gt;, replica3=&lt;none&gt;</span>.</li>
+  <li>پس از حدود <span class="ltr">1026ms</span> همه‌ی نسخه‌ها همگرا شدند و خواندن مجدد از <span class="ltr">replica2</span> مقدار <code>10</code> را برگرداند.</li>
+</ul>
+<p><b>چرا مقدار تغییر کرد؟</b> چون نوشتنِ <span class="ltr">eventual</span> بلافاصله بازمی‌گردد و تکثیر را غیرهمزمان زمان‌بندی می‌کند؛ تا پیش از رسیدن پیام تکثیر، <span class="ltr">replica2</span> مقدار را نداشت و پس از آن همگرا شد.</p>
+
+<h3>۵.۲ سناریوی ۲ — خرابی یک replica (مقایسه‌ی Eventual و Strong)</h3>
+<p><b>حالت الف) یک replica خاموش (replica3):</b> اکثریت (۲ از ۳) همچنان در دسترس است.</p>
+<ul>
+  <li>نوشتن <span class="ltr">eventual</span>: موفق (<span class="ltr">HTTP 200</span>).</li>
+  <li>نوشتن <span class="ltr">strong</span>: موفق با <span class="ltr">replicas_updated=2</span> و <span class="ltr">quorum=2</span>. (<span class="ltr">replica3</span> صرفاً به‌روزرسانی‌ها را از دست می‌دهد و تا بازگشت، <span class="ltr">stale</span> می‌ماند.)</li>
+</ul>
+<p><b>حالت ب) دو replica خاموش (replica2 و replica3):</b> اکثریت از دست رفته است.</p>
+<ul>
+  <li>نوشتن <span class="ltr">eventual</span>: همچنان موفق اعلام می‌شود (فقط نوشتن محلی لازم است) ⟵ دسترس‌پذیری را بر سازگاری ترجیح می‌دهد؛ تنها <span class="ltr">replica1</span> مقدار را دارد.</li>
+  <li>نوشتن <span class="ltr">strong</span>: <b>شکست می‌خورد</b> (<span class="ltr">HTTP 500، replicas_updated=1 &lt; quorum=2</span>) ⟵ به‌جای پذیرش یک نوشتنِ ناایمن، آن را رد می‌کند.</li>
+</ul>
+<div class="box">این سناریو به‌روشنی trade-off میان دسترس‌پذیری (Eventual/AP) و سازگاری (Strong/CP) را نشان می‌دهد.</div>
+
+<h3>۵.۳ سناریوی ۳ — تعارض همزمان و حل آن (LWW)</h3>
+<p>
+تقریباً هم‌زمان، روی دو <span class="ltr">replica</span>ی مختلف برای کلید <code>k</code> دو مقدار متفاوت نوشته شد: <span class="ltr">replica1 ← k=APPLE</span> و <span class="ltr">replica2 ← k=BANANA</span> (هر دو نسخه‌ی ۱). بلافاصله پس از نوشتن (پیش از تکثیر، با تاخیر <span class="ltr">500ms</span>):
+</p>
+<pre>replica1=APPLE(v1)   replica2=BANANA(v1)   replica3=&lt;none&gt;   ← دو replica ناسازگارند</pre>
+<p>پس از تبادل پیام‌های تکثیر، همه‌ی نسخه‌ها پس از حدود <span class="ltr">522ms</span> به مقدار <code>BANANA</code> همگرا شدند. دلیل: هر دو نوشته نسخه‌ی ۱ دارند، پس tie-break (شناسه‌ی بزرگ‌تر) برنده را <span class="ltr">replica2</span> انتخاب می‌کند. شواهد از <span class="ltr">log</span> واقعیِ replicaها:</p>
+<pre>replica1: [REPLICATE] recv key=k v1 from replica2 -> APPLIED
+replica2: [REPLICATE] recv key=k v1 from replica1 -> rejected (kept v1 by replica2)</pre>
+<p>نتیجه روی همه‌ی گره‌ها قطعی و یکسان است و هیچ گره‌ای در حالت واگرا باقی نمی‌ماند.</p>
+
+<h3>۵.۴ سناریوی ۴ — تاثیر تاخیر شبکه</h3>
+<p>سیستم با سه مقدار تاخیر تکثیر (<span class="ltr">0، 500، 2000</span> میلی‌ثانیه) اجرا شد و برای هر کدام تاخیر نوشتن، زمان همگرایی و وقوع خواندن <span class="ltr">stale</span> اندازه‌گیری شد:</p>
+<table>
+  <tr><th>تاخیر تکثیر</th><th>تاخیر PUT (Eventual)</th><th>تاخیر PUT (Strong)</th><th>زمان همگرایی</th><th>خواندن stale توسط کلاینت؟</th></tr>
+  <tr><td>0 ms</td><td>1.3 ms</td><td>0.7 ms</td><td>21.8 ms</td><td>بله (تا همگرایی)</td></tr>
+  <tr><td>500 ms</td><td>3.5 ms</td><td>502.3 ms</td><td>523.7 ms</td><td>بله (تا همگرایی)</td></tr>
+  <tr><td>2000 ms</td><td>3.0 ms</td><td>2002.5 ms</td><td>2037.3 ms</td><td>بله (تا همگرایی)</td></tr>
+</table>
+<p>پاسخ به پرسش‌های این سناریو: (۱) زمان همگرایی تقریباً برابر با مقدار تاخیر تکثیر است. (۲) بله، در این بازه کلاینتی که از <span class="ltr">replica</span>ی دیگر می‌خواند، مقدار قدیمی می‌بیند (زیرِ <span class="ltr">eventual</span>). (۳) تفاوت <span class="ltr">eventual</span> و <span class="ltr">strong</span>: تاخیرِ نوشتنِ <span class="ltr">eventual</span> مستقل از تاخیر شبکه و کم می‌ماند، اما تاخیرِ نوشتنِ <span class="ltr">strong</span> با تاخیر شبکه رشد می‌کند چون باید منتظر تاییدِ اکثریت بماند.</p>
+
+<h2 class="partbreak">۶. جدول متریک‌ها و تحلیل کارایی</h2>
+<p>جدول زیر متریک‌های خواسته‌شده در صورت تمرین را برای سناریوهای مختلف، بر پایه‌ی اندازه‌گیریِ واقعی، گرد می‌آورد (زمان‌ها بر حسب میلی‌ثانیه):</p>
+<table>
+  <tr>
+    <th>سناریو</th><th>مدل</th><th>تاخیر PUT</th><th>تاخیر GET</th>
+    <th>زمان همگرایی</th><th>تعداد replica به‌روز شده</th><th>خواندن stale</th>
+  </tr>
+  <tr><td>۱ (delay=1000)</td><td>Eventual</td><td>3.5</td><td>2.3</td><td>~1026</td><td>۱ ← سپس ۳</td><td>۱</td></tr>
+  <tr><td>۲-الف (۱ خاموش)</td><td>Eventual</td><td>0.7</td><td>~2</td><td>—</td><td>۲</td><td>۰</td></tr>
+  <tr><td>۲-الف (۱ خاموش)</td><td>Strong</td><td>11.1</td><td>~2</td><td>فوری</td><td>۲</td><td>۰</td></tr>
+  <tr><td>۲-ب (۲ خاموش)</td><td>Eventual</td><td>~0.0</td><td>~2</td><td>فقط محلی</td><td>۱</td><td>—</td></tr>
+  <tr><td>۲-ب (۲ خاموش)</td><td>Strong</td><td>0.8 (شکست)</td><td>—</td><td>—</td><td>۱ (ناموفق)</td><td>—</td></tr>
+  <tr><td>۳ (delay=500)</td><td>Eventual</td><td>~1</td><td>~2</td><td>~522</td><td>۳ (LWW→replica2)</td><td>تعارض</td></tr>
+  <tr><td>۴ @0ms</td><td>Eventual / Strong</td><td>1.3 / 0.7</td><td>~2</td><td>21.8</td><td>۳</td><td>۱</td></tr>
+  <tr><td>۴ @500ms</td><td>Eventual / Strong</td><td>3.5 / 502.3</td><td>~2</td><td>523.7</td><td>۳</td><td>۱</td></tr>
+  <tr><td>۴ @2000ms</td><td>Eventual / Strong</td><td>3.0 / 2002.5</td><td>~2</td><td>2037.3</td><td>۳</td><td>۱</td></tr>
+</table>
+<p class="note box"><b>تعریف متریک‌ها:</b> «تاخیر PUT/GET» مدت زمان از ارسال درخواست تا دریافت پاسخ در کلاینت است. «زمان همگرایی» مدت زمانی است تا همه‌ی <span class="ltr">replica</span>های فعال مقدار جدید را گزارش کنند. «تعداد replica به‌روز شده» تعداد نسخه‌هایی است که پس از یک <code>PUT</code> مقدار جدید را دارند. «خواندن stale» تعداد خواندن‌هایی است که در پنجره‌ی ناسازگاری مقدار قدیمی/غایب برگردانده‌اند.</p>
+
+<figure>
+  <img src="images/latency.png" alt="latency">
+  <figcaption>شکل ۳: تاخیر PUT بر حسب تاخیر تکثیر (محور عمودی لگاریتمی). تاخیر eventual تقریباً ثابت و کم می‌ماند؛ تاخیر strong با تاخیر شبکه به‌صورت خطی رشد می‌کند.</figcaption>
+</figure>
+<figure>
+  <img src="images/convergence.png" alt="convergence">
+  <figcaption>شکل ۴: زمان همگرایی بر حسب تاخیر تکثیر — تقریباً متناسب با مقدار تاخیر است.</figcaption>
+</figure>
+
+<h2>۷. مقایسه‌ی Eventual و Strong و تحلیل Trade-off</h2>
+<table>
+  <tr><th>ویژگی</th><th>Eventual Consistency</th><th>Strong Consistency</th></tr>
+  <tr><td>تاخیر نوشتن</td><td>کم و مستقل از تاخیر شبکه</td><td>زیاد؛ متناسب با تاخیر شبکه و تاییدِ اکثریت</td></tr>
+  <tr><td>دسترس‌پذیری هنگام خطا</td><td>بالا (تا وقتی یک گره زنده است)</td><td>پایین (نیازمند اکثریت)</td></tr>
+  <tr><td>سازگاری خواندن</td><td>ممکن است stale باشد</td><td>پس از تاییدِ اکثریت، سازگار</td></tr>
+  <tr><td>گرایش CAP</td><td>AP</td><td>CP</td></tr>
+  <tr><td>کاربرد مناسب</td><td>شمارنده‌ها، کش، فید اجتماعی</td><td>موجودی، تراکنش، رزرو</td></tr>
+</table>
+<p>
+داده‌های آزمایش این تحلیل را تایید می‌کنند: در حالی که تاخیر نوشتنِ <span class="ltr">eventual</span> با افزایش تاخیر شبکه عملاً ثابت ماند (حدود ۱ تا ۴ میلی‌ثانیه)، تاخیر نوشتنِ <span class="ltr">strong</span> از <span class="ltr">~0.7ms</span> به <span class="ltr">~2002ms</span> رسید. در مقابل، <span class="ltr">eventual</span> این سرعت را با پذیرش پنجره‌ی ناسازگاری و خواندن‌های <span class="ltr">stale</span> «خریده» است. به بیان دیگر، هیچ مدلی مطلقاً بهتر نیست؛ انتخاب میان «سرعت و دسترس‌پذیری» و «سازگاری» است.
+</p>
+
+<h2>۸. مشکلات و محدودیت‌های پیاده‌سازی</h2>إ
+<ul>
+  <li><b>ذخیره‌سازی در حافظه:</b> داده‌ها در <span class="ltr">map</span> درون‌حافظه‌ای نگه‌داری می‌شوند؛ با راه‌اندازی مجددِ یک <span class="ltr">replica</span>، داده‌های آن از بین می‌رود (پایداری روی دیسک پیاده‌سازی نشده است).</li>
+  <li><b>تکثیر غیرتراگذر (بدون Gossip):</b> درگاه <code>/internal/replicate</code> مقدار را اعمال می‌کند ولی آن را دوباره منتشر نمی‌کند. بنابراین همگرایی به این وابسته است که نویسنده‌ی اصلی به همه‌ی همتایان برسد؛ گره‌ای که یک به‌روزرسانی را از دست بدهد، آن را از گره‌ی دیگر یاد نمی‌گیرد (مکانیزم <span class="ltr">anti-entropy</span> وجود ندارد).</li>
+  <li><b>Strong ساده‌شده (بدون 2PC/Rollback):</b> در نوشتنِ <span class="ltr">strong</span>، مقدار ابتدا به‌صورت محلی اعمال می‌شود و سپس اکثریت بررسی می‌گردد. اگر اکثریت حاصل نشود، خطا برگردانده می‌شود اما مقدار ممکن است روی گره‌ی هماهنگ‌کننده (و همتایانی که تایید کرده‌اند) باقی بماند؛ یعنی اتمیک بودن کامل تضمین نمی‌شود.</li>
+  <li><b>Last-Write-Wins و Lost Update:</b> در تعارض همزمان، یکی از دو نوشته کنار گذاشته می‌شود؛ برای حفظ هر دو باید از ساختارهایی مانند <span class="ltr">vector clocks</span> یا <span class="ltr">CRDT</span> استفاده کرد.</li>
+</ul>
+
+<h2>۹. جمع‌بندی</h2>
+<p>
+در این تمرین یک <span class="ltr">Replicated Key-Value Store</span> ساده با سه <span class="ltr">replica</span>ی مستقل و ارتباط شبکه‌ای واقعی پیاده‌سازی شد و دو مدل سازگاریِ <span class="ltr">eventual</span> و <span class="ltr">strong</span> به‌همراه نسخه‌گذاری و حل تعارض <span class="ltr">Last-Write-Wins</span> به‌کار رفت. آزمایش‌ها به‌صورت عملی نشان دادند که چگونه تکثیر، دسترس‌پذیری و تحمل خطا را افزایش می‌دهد، چرا تکثیر مشکل سازگاری می‌سازد، و تفاوت رفتاریِ دو مدل سازگاری در خواندن‌های <span class="ltr">stale</span>، تعارض، خرابی گره و زمان همگرایی چگونه است. داده‌های اندازه‌گیری‌شده، trade-off بنیادینِ میان سازگاری و دسترس‌پذیری/کارایی (مطابق قضیه‌ی CAP) را به‌روشنی تایید می‌کنند.
+</p>
+
+</body>
+</html>

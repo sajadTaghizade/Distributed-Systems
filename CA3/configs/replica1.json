@@ -1,0 +1,5 @@
+{
+  "id": "replica1",
+  "port": "8081",
+  "peers": ["http://localhost:8082", "http://localhost:8083"]
+}

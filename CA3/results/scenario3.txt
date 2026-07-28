@@ -1,0 +1,26 @@
+SCENARIO 3 — Concurrent conflict and resolution (Last-Write-Wins)
+================================================================
+Cluster: replica1:8081, replica2:8082, replica3:8083 | replication delay = 500 ms
+Conflict policy: highest version wins; on equal versions the larger replica id wins.
+
+Step 1) Almost simultaneously write key k with different values on two replicas:
+  replica1 <- k=APPLE   |   replica2 <- k=BANANA   (both become version 1)
+  replica1 resp: {"consistency":"eventual","key":"k","note":"asynchronous replication in progress","replicas_updated":1,"status":"success","version":1}
+  replica2 resp: {"consistency":"eventual","key":"k","note":"asynchronous replication in progress","replicas_updated":1,"status":"success","version":1}
+
+Step 2) Immediately after the writes (before replication, delay=500 ms):
+  replica1=APPLE(v1)  replica2=BANANA(v1)  replica3=<none>   <- the two replicas disagree (conflict)
+
+Step 3) Let replicas exchange replication messages, then read final values:
+  converged=true after 521.5 ms
+  final: replica1=BANANA(v1)  replica2=BANANA(v1)  replica3=BANANA(v1)
+
+Step 4) Conflict-resolution explanation:
+  Both writes produced version 1 but different values, so versions alone cannot decide a
+  winner. The tie-break rule (larger updated_by wins) selects "replica2", so BANANA wins
+  on every replica. The result is deterministic and identical on all nodes — no replica is
+  left in a divergent state, and an older/over-written value never replaces the winner.
+
+Evidence — replica1 accepted replica2's value, replica2 rejected replica1's value:
+  2026/06/20 03:57:02 [REPLICATE] recv key=k v1 from replica2 -> APPLIED
+  2026/06/20 03:57:02 [REPLICATE] recv key=k v1 from replica1 -> rejected (kept v1 by replica2)

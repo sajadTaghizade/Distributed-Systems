@@ -1,0 +1,26 @@
+SCENARIO 2 — Replica failure: eventual vs strong consistency
+===========================================================
+Cluster: replica1:8081, replica2:8082, replica3:8083 | delay = 0 ms | quorum = 2/3
+
+Case A) One replica down (replica3 stopped) — majority (2/3) still available
+  stopped replica3.
+  EVENTUAL PUT a=1 -> replica1 | 0.7 ms | HTTP 200 | resp: {"consistency":"eventual","key":"a","note":"asynchronous replication in progress","replicas_updated":1,"status":"success","version":1}
+  STRONG   PUT a=2 -> replica1 | 11.1 ms | HTTP 200 | resp: {"consistency":"strong","key":"a","quorum":2,"replicas_updated":2,"status":"success","version":2}
+  snapshot (replica3 is DOWN): replica1=2(v2)  replica2=2(v2)  replica3=DOWN
+  >> With one failure, BOTH models still succeed (a majority of 2 is reachable).
+     replica3 simply misses the updates and will be stale until it returns.
+
+Case B) Two replicas down (replica2 and replica3 stopped) — majority lost
+  stopped replica2. Only replica1 is alive now.
+  EVENTUAL PUT b=1 -> replica1 | 0.0 ms | HTTP 200 | resp: {"consistency":"eventual","key":"b","note":"asynchronous replication in progress","replicas_updated":1,"status":"success","version":1}
+  >> Eventual PUT still returns success: it only needs the local write; it sacrifices
+     consistency for availability. Only replica1 holds b=1.
+  STRONG   PUT b=2 -> replica1 | 0.8 ms | HTTP 500 | resp: {"consistency":"strong","key":"b","message":"failed to achieve quorum","quorum":2,"replicas_updated":1,"status":"error","version":2}
+  >> Strong PUT FAILS (HTTP 500): it cannot reach a majority, so it refuses the write
+     rather than accept an unsafe one. This is the availability/consistency trade-off.
+
+Conclusion:
+  - Eventual consistency favours AVAILABILITY: writes are accepted even when peers are
+    unreachable, at the cost of temporary (or, during a partition, prolonged) staleness.
+  - Strong consistency favours CONSISTENCY: a write succeeds only with majority acks,
+    so it becomes unavailable when a majority is down.

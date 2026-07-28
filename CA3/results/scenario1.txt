@@ -1,0 +1,31 @@
+SCENARIO 1 — Observing temporary inconsistency (eventual consistency)
+=====================================================================
+Cluster: replica1:8081, replica2:8082, replica3:8083 | replication delay = 1000 ms
+A delay is configured so the brief inconsistency window is observable on localhost.
+
+Step 1) PUT x=10 on replica1 (eventual)
+  client: PUT x=10 [eventual] -> replica1 | 3.5 ms | HTTP 200
+  response: {"consistency":"eventual","key":"x","note":"asynchronous replication in progress","replicas_updated":1,"status":"success","version":1}
+
+Step 2) IMMEDIATELY GET x from replica2
+  client: GET x -> replica2 | 2.3 ms | HTTP 404
+  response: {"error":"key not found","key":"x","served_by":"replica2"}
+  >> STALE READ: replica2 does not have x=10 yet (write still propagating).
+
+Step 3) Snapshot of all replicas right after the write:
+  replica1=10(v1)  replica2=<none>  replica3=<none>
+
+Step 4) Wait for convergence, then GET x from replica2 again
+  convergence reached: true after 1025.8 ms
+  client: GET x -> replica2 | 0.0 ms | HTTP 200
+  response: {"key":"x","served_by":"replica2","updated_by":"replica1","value":"10","version":1}
+  final snapshot: replica1=10(v1)  replica2=10(v1)  replica3=10(v1)
+
+Step 5) Why did the value change?
+  The eventual-consistency PUT returns as soon as replica1 applies it locally and
+  schedules asynchronous replication. With a 1000 ms delay, replica2 had not yet
+  received the update at step 2, so it answered with the old (missing) state — a stale
+  read. After the replication message arrived (~the delay), replica2 converged to x=10.
+
+Replica-side replication log (replica2):
+  2026/06/20 03:57:00 [REPLICATE] recv key=x v1 from replica1 -> APPLIED
