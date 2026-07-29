@@ -9,6 +9,13 @@ Two independent domains throughout — a smart hospital and a smart city, 50
 services each, 350 resolvable Interest names and 350 unsatisfiable ones. Where
 they disagree, that is said.
 
+Every number below is twenty seeds. Where an effect is small enough that the
+per-arm intervals overlap, the comparison is repeated **paired by seed** — all
+arms see the same workload, the same events and the same producers, so the
+seed-to-seed variation those intervals are made of is shared and cancels. That
+is said explicitly wherever it is done, and the unpaired means are printed
+alongside so nothing rests on the paired form alone.
+
 ---
 
 ## 1. What the forwarding path costs
@@ -97,6 +104,76 @@ Learned boundaries spread as evidence accumulates — standard deviation 0.000 a
 0.096 at ε = 0.40. That spread is the direct evidence that a single global
 number could not have served every route.
 
+### Against a threshold tuned on the other domain
+
+The comparison above is not the one a sceptic would ask for. A fixed threshold
+traces its own frontier: sweep it and every point is a (realised error,
+satisfaction) pair, so an operator who can measure realised error on their own
+catalog can simply pick the point they want. Section 3's flat precision curve
+does not answer that; it only says where the best F1 sits.
+
+What the budget can claim over such an operator is narrower, and it is about
+*transfer*. A threshold is placed using the catalog available at tuning time,
+and the network it then runs on is not that catalog. So: build the frontier on
+one domain, take for each budget the most permissive threshold whose realised
+error stays inside it, carry that threshold to the other domain, and stand it
+against rc-ndn given the same budget and calibrating live on the domain it was
+moved to. Same configuration as the sweep above, twenty seeds
+(`--experiment threshold_transfer`).
+
+**Tuned on city, evaluated on hospital:**
+
+| ε | 0.02 | 0.05 | 0.10 | 0.15 | 0.20 | 0.30 | 0.40 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| threshold chosen on city | 0.45 | 0.45 | 0.45 | 0.45 | 0.45 | 0.45 | 0.45 |
+| its realised error on hospital | **0.032** | 0.032 | 0.032 | 0.032 | 0.032 | 0.032 | 0.032 |
+| within budget | **✗** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| its satisfaction | 0.971 | 0.971 | 0.971 | 0.971 | 0.971 | 0.971 | 0.971 |
+| rc-ndn realised error | 0.009 | 0.009 | 0.009 | 0.010 | 0.014 | 0.025 | 0.035 |
+| rc-ndn satisfaction | 0.818 | 0.818 | 0.841 | 0.885 | 0.919 | 0.959 | 0.967 |
+
+**Tuned on hospital, evaluated on city:**
+
+| ε | 0.02 | 0.05 | 0.10 | 0.15 | 0.20 | 0.30 | 0.40 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| threshold chosen on hospital | 0.70 | 0.45 | 0.45 | 0.45 | 0.45 | 0.45 | 0.45 |
+| its realised error on city | 0.003 | 0.011 | 0.011 | 0.011 | 0.011 | 0.011 | 0.011 |
+| its satisfaction | 0.804 | 0.983 | 0.983 | 0.983 | 0.983 | 0.983 | 0.983 |
+| rc-ndn realised error | 0.010 | 0.010 | 0.011 | 0.009 | 0.012 | 0.016 | 0.020 |
+| rc-ndn satisfaction | 0.813 | 0.813 | 0.845 | 0.916 | 0.956 | 0.977 | 0.979 |
+
+**rc-ndn does not dominate the transferred frontier, and the earlier claim of
+better efficiency is withdrawn.** Across the fourteen comparisons -- seven
+budgets in each direction -- rc-ndn Pareto-dominates in **none**. The
+transferred threshold dominates in four, all at ε ≥ 0.2 on the hospital-tuned
+side where 0.45 reaches 0.983 satisfaction inside budget and rc-ndn's best is
+0.979. The other ten are trades: less error for less satisfaction, which is the
+same trade section 4 already reports.
+
+Two things survive, and they are worth less than the withdrawn claim.
+
+*The transferred threshold missed the budget once, and it was the tightest one.*
+Tuned on city at ε = 0.02, 0.45 realises 0.011 there and 0.032 on hospital --
+over budget by 61%, and the miss is resolved rather than borderline: the
+interval is ±0.009, so even its lower end, 0.023, sits above the 0.020 it was
+asked for. rc-ndn held its budget in all fourteen. One violation in fourteen is a
+weak result and is reported as one; what makes it worth reporting at all is
+where it landed. Every budget from 0.05 up is slack -- no threshold in the sweep
+realises more than 0.032 error on either domain -- so "tuning" degenerates to
+"take the most permissive threshold" and transfer cannot fail. The one budget
+that actually binds is the one transfer broke.
+
+*The two knobs are not equally available.* Placing a threshold on the frontier
+requires having measured realised error, which requires a labelled catalog for
+the domain you are about to run on. That is the assumption the transfer
+experiment removes, and removing it is the whole point: rc-ndn gets its labels
+from producer feedback at run time, on the domain it is actually deployed in.
+The defensible statement is therefore **not** that the budget forwards more
+efficiently, but that it is *tunable without access to the test domain* and
+reports where on the curve it ended up. On these two catalogs an operator who
+does have a labelled sample of the target domain should tune a threshold on it
+and will do slightly better.
+
 ### Why a flat per-route estimator does not work
 
 The first version estimated each route's boundary from its own observations
@@ -139,10 +216,10 @@ savings that motivated the earlier version.
 
 ## 6. Producer churn
 
-Producers depart, return and relocate. Relocation is the hard case: the name
-stays available, nothing times out, and no similarity score changes — a router
-with a cached mapping keeps forwarding to a face that no longer leads anywhere
-useful. Only feedback detects it.
+Producers depart, return and relocate. Relocation looks like the hard case: the
+name stays available, nothing times out, and no similarity score changes — a
+router with a cached mapping keeps forwarding to a face that no longer leads
+anywhere useful.
 
 Interest satisfaction, hospital, 8 edge routers:
 
@@ -152,19 +229,140 @@ Interest satisfaction, hospital, 8 edge routers:
 | GS-NDN | 0.940 | 0.851 | 0.787 | 0.587 | 0.380 |
 | GS-NDN, no verification | 0.932 | 0.844 | 0.780 | 0.584 | 0.380 |
 | Risk-controlled | 0.919 | 0.828 | 0.764 | 0.579 | 0.368 |
+| Risk-controlled, adaptive ε | 0.931 | 0.838 | 0.771 | 0.586 | 0.375 |
 
 **This is a negative result and is reported as one.** Churn was the setting
-where verification was expected to finally earn its cost: a relocation changes
-the right answer without changing any similarity score, so re-encoding cannot
-detect it and only feedback can. Over twenty seeds no such advantage appears.
-Every strategy degrades together, and at one second between events all four land
-within 0.02 of each other. A single-seed run during development suggested
-risk-controlled forwarding pulled ahead under churn; it does not.
+where verification was expected to finally earn its cost. Over twenty seeds no
+such advantage appears. Every strategy degrades together, and at one second
+between events all five land within 0.02 of each other. A single-seed run during
+development suggested risk-controlled forwarding pulled ahead under churn; it
+does not.
 
-What churn does establish is that the Embedding Store's invalidation path --
-specified by SAF, implemented here, and never exercised by any static experiment
--- is now under load, and that no strategy in this family tolerates a network
-reorganising itself every second.
+**And the experiment could not have shown otherwise, which is a fault in the
+experiment.** Departure and relocation both withdraw the producer's FIB route,
+and withdrawing a route also invalidates every Embedding Store entry that
+pointed at it — the consistency rule SAF specifies, implemented here, applied
+identically for every strategy. So the stale mapping is destroyed *by the event*
+before any producer can be given the chance to refuse it. The signal
+verification exists to catch is erased by the same mechanism that reports the
+event. Only feedback can detect a relocation, but nothing was left for feedback
+to detect.
+
+What this arm does establish is that the invalidation path is now under load,
+and that no strategy in this family tolerates a network reorganising itself
+every second.
+
+### Schema drift: the event that leaves only feedback
+
+A producer keeps its routes, its attachment and its FIB entries, and quietly
+stops recognising a subset of the wordings it used to answer — its declared
+alias set shrinks. No route is withdrawn, nothing is invalidated, no timeout
+fires, no similarity score changes; the encoder's view of the world is exactly
+what it was. The canonical term is never dropped, so exact matching is
+untouched and the routing plane observes nothing at all. A producer's live
+refusal is the only observable in the system.
+
+What drift moves is **wasted work, not satisfaction**. A wording its producer
+has stopped answering cannot be satisfied by anyone, so no strategy recovers it;
+what separates them is how long they keep spending a round trip to be told no.
+Hospital, share of Interests a producer refused:
+
+| mean seconds between drifts | static | 10 s | 5 s | 2 s | 1 s |
+|---|---:|---:|---:|---:|---:|
+| SAF+ES | 0.045 | 0.050 | 0.056 | 0.074 | 0.103 |
+| GS-NDN, no verification | 0.045 | 0.050 | 0.056 | 0.074 | 0.102 |
+| GS-NDN | 0.034 | 0.039 | 0.046 | 0.064 | **0.094** |
+| Risk-controlled | 0.023 | 0.027 | 0.032 | 0.045 | **0.066** |
+| Risk-controlled, adaptive ε | 0.027 | 0.029 | 0.035 | 0.048 | 0.071 |
+
+with satisfaction 0.880 / 0.880 / 0.886 / 0.855 / 0.864 at one second.
+
+Those satisfaction gaps are small next to their own confidence intervals, but
+every arm sees the same workload, the same drift events and the same producers,
+so the seed-to-seed variation the intervals are made of is shared and cancels.
+Paired seed by seed at the hardest point (`--experiment drift_paired`,
+twenty seeds, differences against GS-NDN without verification):
+
+| | ISR | producer refusals | seeds won |
+|---|---:|---:|---:|
+| GS-NDN, hospital | **+0.0052 ± 0.0013** | −0.0083 ± 0.0016 | **20 / 20** |
+| GS-NDN, city | **+0.0101 ± 0.0036** | −0.0171 ± 0.0039 | **19 / 20** |
+| SAF+ES, hospital | −0.0000 ± 0.0002 | +0.0001 ± 0.0002 | 6 / 20 |
+| Risk-controlled, hospital | −0.0252 ± 0.0085 | −0.0361 ± 0.0082 | 0 / 20 |
+
+**What drift restores is verification's advantage, which relocation erases.**
+The advantage over not verifying is +0.0080 satisfaction on a static hospital
+network — the 0.8 points the ablation already reports. Under relocation at one
+second it is +0.0005: gone, because the route withdrawal destroyed the mapping
+first. Under schema drift at one second it is **+0.0052 ± 0.0013, on twenty
+seeds out of twenty**, with 8% fewer Interests wasted on a producer that will
+refuse; city gives +0.0101 ± 0.0036 on nineteen of twenty and 14% fewer. So
+drift keeps about two thirds of the static advantage under a churn rate that
+otherwise destroys it, and the claim this experiment can support is that
+**feedback survives an event nothing else can see** — not that churn is where
+verification finally becomes large. It does not become large anywhere.
+
+SAF+ES lands on top of GS-NDN-without-verification to four decimal places, which
+is the sanity check the arm needed: both cache on resolution and neither
+retracts, so under this event they are the same system, and they measure as it.
+
+The risk controller trades in the other direction, and hard: 36% fewer refused
+Interests than SAF+ES at one second (0.066 against 0.103) for two and a half
+points of satisfaction. That is the same trade section 4 reports, and drift
+sharpens it rather than changing it. City behaves the same way — verification
++0.0101 ± 0.0036 satisfaction on 19 of 20 seeds, refusals 0.101 against 0.118.
+
+### Does an adaptive budget help?
+
+Section 14 has been listing exchangeability as a known hole: conformal-style
+bounds assume the calibration and test distributions match, and churn violates
+that. Adaptive Conformal Inference (Gibbs & Candès, NeurIPS 2021) is the
+principled fix, and `rc-ndn-aci` implements it — the budget itself moves,
+ε<sub>t+1</sub> = ε<sub>t</sub> + γ(ε<sub>target</sub> − err<sub>t</sub>), where
+err<sub>t</sub> is the miscoverage indicator of the decision just judged. Only
+decisions the boundary actually covered drive it; exploratory forwards below the
+boundary are decisions the budget did not cover (section 5) and feeding them in
+would have the controller punish itself for gathering evidence.
+
+**The mechanism does what it says.** Effective ε with a target of 0.2, hospital:
+
+| mean seconds between events | static | 10 s | 5 s | 2 s | 1 s |
+|---|---:|---:|---:|---:|---:|
+| under schema drift | 0.197 | 0.182 | 0.174 | 0.160 | **0.149** |
+| under relocation churn | 0.197 | 0.242 | 0.266 | 0.341 | **0.364** |
+
+Drift produces real coverage errors, so the budget tightens with the drift rate
+— exactly the intended direction, and the first direct evidence in this work
+that the adaptive loop is doing anything at all. City tightens the same way,
+0.186 → 0.135.
+
+**The benefit does not follow the mechanism.** Paired against static rc-ndn on
+identical seeds, schema drift at one second:
+
+| | ISR | producer refusals | seeds won |
+|---|---:|---:|---:|
+| hospital | +0.0091 ± 0.0046 | +0.0045 ± 0.0029 | 17 / 20 |
+| city | +0.0007 ± 0.0055 | +0.0017 ± 0.0025 | **10 / 20** |
+
+Nine tenths of a point of satisfaction on hospital — resolved, but tiny, and
+paid for with slightly more wasted round trips. On city it is a coin flip — ten
+seeds out of twenty, an interval eight times the effect. **Adaptation does not
+give a consistent edge over a static budget under drift, and this is reported as
+the weak result it is.** One domain of two, one point of satisfaction, and the
+sign of the refusal difference is against it in both.
+
+**And under relocation churn it drifts the wrong way, which is the more
+interesting finding.** Route withdrawals destroy the mappings before they can be
+refuted (above), so the decisions that survive to be judged are mostly correct,
+and the update rule reads a clean stretch and loosens. At one second between
+relocations the effective budget has climbed to 0.364 on hospital and 0.501 on
+city, the latter past the top of the range section 4 sweeps at all. Realised error
+rises with it, 0.017 → 0.027 on hospital, and stays far inside 0.2 only because
+this catalog cannot produce much error at any setting. **The number the operator
+set has stopped being the number in force**, and nothing in the mechanism
+reports that. ACI's guarantee is asymptotic coverage, not a per-run bound, and
+this is what that distinction costs on a network reorganising itself every
+second. Clipping the range is a floor and a ceiling, not a fix.
 
 ## 7. Compromised routers
 
@@ -211,6 +409,51 @@ sharing what it can and stops sharing what it cannot.
 This is the structural argument for gossiping names and verdicts rather than
 vectors, and it is the second reason signatures were the wrong currency: they
 are not portable across encoders either.
+
+### What the guard is actually worth
+
+That argument was asserted for one version of this document and never tested:
+only the arm that refuses to pool was run, so "graceful" had nothing to be
+graceful against. `rc-ndn-naive-mix` is the missing baseline — the same
+controller with the guard removed, gossiping scores across the encoder boundary
+as though a MiniLM 0.62 and an n-gram 0.62 were the same number. It has to be a
+risk-controlled arm: GS-NDN gossips mappings and no scores at all, so a naive
+version of it would have nothing to mix.
+
+Hospital, 8 edge routers, twenty seeds:
+
+| lexical share | 0% | 25% | 50% |
+|---|---:|---:|---:|
+| ISR, guard on | 0.919 | 0.911 | 0.882 |
+| ISR, guard off | 0.919 | 0.911 | **0.882** |
+| realised error, guard on | 0.014 | 0.014 | 0.014 |
+| realised error, guard off | 0.014 | 0.014 | **0.015** |
+| mean learned boundary, guard on | 0.776 | 0.829 | **0.866** |
+| mean learned boundary, guard off | 0.776 | 0.781 | **0.807** |
+| evidence dropped / mixed | 0 / 0 | 389 / 0 | 320 / 0 |
+
+**Pooling incomparable scores measurably corrupts the boundaries and does not
+measurably hurt anything else.** The learned boundary is where the two arms
+separate cleanly: at 50% heterogeneity it sits 0.06 lower on hospital (0.807
+against 0.866) and 0.09 lower on city (0.681 against 0.768), because n-gram
+scores are distributed higher and drag the pooled estimate down. That is the
+predicted failure, visible and unambiguous.
+
+It does not reach the outcome. Satisfaction is identical to three decimals on
+hospital (0.8817 ± 0.0166 against 0.8821 ± 0.0161 at 50%) and within noise on
+city; realised error differs by 0.0013 at 50% hospital with confidence intervals
+of ±0.005 on both. **The naive baseline does not degrade worse, and the
+expectation that it would is not borne out.** The guard prevents a
+mis-calibration that these two catalogs are too forgiving to punish — every
+threshold on either domain realises under 0.035 error (section 4), so a boundary
+displaced by 0.06 still lands somewhere safe. On a catalog where the boundary
+had to be precise the corruption would presumably cost something; that is a
+conjecture, and it is not what was measured here.
+
+The guard stays, because a mechanism that is right for a stated reason and free
+in practice is worth keeping, and because a deployment cannot know in advance
+that its catalog is one of the forgiving ones. But the earlier phrasing invited
+a reader to think refusing to pool had been shown to matter, and it has not.
 
 ## 9. Where the cost goes as the network grows
 
@@ -309,12 +552,74 @@ both setups define identically. See [`ndnsim/`](ndnsim/).
   that condition is worth; it does not remove it.
 - **Exchangeability.** Conformal-style bounds assume the calibration and test
   distributions match. Zipf popularity and producer churn both violate this. The
-  hierarchical estimator and the bounded observation window mitigate it; a
-  weighted or adaptive variant would be the principled fix and is not
-  implemented.
+  hierarchical estimator and the bounded observation window mitigate it. The
+  adaptive variant is now implemented and measured (section 6): it moves the
+  budget in the right direction under schema drift, gives an edge on one domain
+  of two, and under relocation churn drifts the effective budget to 0.36–0.50
+  against a target of 0.2. It replaces a per-run bound with asymptotic coverage,
+  and on a fast-churning network that is a real loss of what the operator's
+  number meant.
 - **The catalogs are generated from a lexicon**, not collected from a
   deployment. The rewrite families mirror how IoT namespaces diverge, but they
-  are still our idea of that.
+  are still our idea of that. Part of this has now been measured rather than
+  conceded — see below — and the measurement is not flattering.
 - **One transformer.** SAF compares MiniLM-L6, MiniLM-L12 and MPNet and finds
   recognition quality nearly identical; only L6 is used here, alongside the
   lexical control.
+- **Source weighting against poisoned evidence is not implemented.** Section 7
+  shows a compromised router's fabricated observations moving a victim's
+  boundary, and names provenance and reputation as the obvious next step. A
+  k-source quorum -- accept a boundary shift only when independent routers
+  agree -- is the specific mechanism, and it remains unwritten.
+
+### How much of the vocabulary is ours
+
+The synonym objection can be partly measured instead of only conceded. The
+grounded catalogs (`hospital-grounded`, `city-grounded`) add a seventh rewording
+per service, taken from **Brick Schema 1.3, ETSI SAREF, Project Haystack 4 or
+W3C/OGC SSN/SOSA** where those vocabularies name the quantity at all
+(`gsndn/datasets/ontology.py`, one citation per entry, transcribed by hand — no
+ontology file is fetched at build time). They are separate domains rather than a
+redefinition of the reported ones, so nothing above moves.
+
+Coverage is uneven and the catalog reports its own share. These are building and
+sensing vocabularies: **20 of 50 hospital services** get a standardised wording
+(temperature, humidity, air quality, occupancy) and **45 of 50 city services**
+do. Heart rate, blood pressure, oxygen, respiration, glucose, infusion and bus
+timetables have no class in any of the four, keep their invented synonyms and
+are counted separately as fallbacks rather than averaged in.
+
+Rank-1 recognition — does a cosine search over the 50-entry FIB put the right
+service first — by rewrite family, restricted to the services a standard
+actually names so that the same services are being compared:
+
+| | synonym | abbreviated | flattened | alt_synonym | reordered | verbose | **ontology** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| hospital (n = 20 each) | 0.950 | 0.750 | 0.850 | 0.900 | 0.800 | 0.850 | **0.800** |
+| city (n = 45 each) | 0.911 | 0.844 | 0.933 | 0.844 | 0.933 | 0.889 | **0.578** |
+
+**On the city domain the standardised wordings are far harder than any we
+invented** — 0.578 against 0.844–0.933, a gap of at least 27 points on exactly
+the same services, and the mean score to the true service drops to 0.620 from
+0.626–0.743. The reason is visible in the terms: Brick calls a crowd sensor
+`Occupancy_Count_Sensor`, a waste-bin monitor `Level_Sensor`, a traffic detector
+`MotionSensor`. Those are correct and they are nothing like what a city
+integrator writes, which is precisely the kind of synonymy our lexicon does not
+contain. On the hospital domain the ontology family sits at 0.800 against
+0.750–0.950 for the invented ones — inside the range, at the lower end.
+
+**So the reviewer's suspicion is confirmed on one domain of two.** The invented
+rewrite families are easier than published class names wherever the standard's
+vocabulary diverges from the domain's colloquial one, and every recognition
+number above is measured on the easier set. End to end on the grounded catalogs
+the ordering between strategies is unchanged — hospital-grounded ISR 0.920
+(SAF+ES) / 0.938 (GS-NDN) / 0.902 (rc-ndn at ε = 0.2), city-grounded 0.906 /
+0.922 / 0.874, twenty seeds — but those are different datasets with a seventh
+wording per service and are not comparable line-for-line with section 1.
+
+**And this fixes only half of what it was aimed at.** It grounds *class
+synonyms*: the words for the thing being measured. It does nothing for how a
+client actually phrases a request — word order, abbreviation, local convention,
+whatever the integrator typed at three in the morning — because no published
+ontology describes that and no public NDN trace exists to supply it. The
+phrasing axis is exactly as invented as it was.

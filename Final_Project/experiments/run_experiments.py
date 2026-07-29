@@ -12,12 +12,20 @@ Experiments:
 
 ``main``        every strategy on both domains, one operating point
 ``threshold``   precision and recall against the similarity threshold
+``threshold_transfer``
+                a fixed threshold tuned on one domain, evaluated on the other,
+                against a risk controller calibrating live on that other domain
 ``rate``        latency against offered load, where queueing appears
 ``scaling``     encoder cost against the number of edge routers
 ``convergence`` fast-path share over time, learning alone against being taught
 ``ablation``    GS-NDN with each of its mechanisms removed in turn
 ``energy``      radio and compute energy, including the SEF baseline
 ``encoder``     MiniLM against the lexical control
+``ontology``    invented synonyms against ones transcribed from published
+                IoT ontologies (Brick, SAREF, Haystack, SSN/SOSA)
+``churn``       producers that move, and producers that quietly narrow what
+                they answer to
+``drift_paired`` the drift arm's separations, paired seed by seed
 """
 
 from __future__ import annotations
@@ -33,7 +41,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gsndn import datasets  # noqa: E402
-from gsndn.embeddings import PrecomputedBackend  # noqa: E402
+from gsndn.embeddings import NameIndex, PrecomputedBackend  # noqa: E402
 from gsndn.metrics import aggregate, format_table  # noqa: E402
 from gsndn.runner import RunResult, ScenarioConfig, run_once  # noqa: E402
 from gsndn.adversary import AdversaryConfig  # noqa: E402
@@ -138,6 +146,161 @@ def exp_threshold(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
                 print(f"    Th={threshold}: precision {stats['precision']['mean']:.3f} "
                       f"recall {stats['recall']['mean']:.3f} f1 {stats['f1']['mean']:.3f}")
     return out
+
+
+#: The fixed-threshold sweep points, shared by ``threshold`` and
+#: ``threshold_transfer`` so the two are reading the same operating points.
+THRESHOLD_POINTS = (0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8)
+
+#: Budgets the risk controller is asked to hold, matched to ``exp_risk`` so the
+#: two experiments' rc-ndn arms are directly comparable.
+EPSILON_POINTS = (0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40)
+
+
+def exp_threshold_transfer(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
+    """Does a threshold tuned on one domain still hold its budget on another?
+
+    A fixed cosine threshold traces an efficiency frontier: sweep it and every
+    point is a (realised error, satisfaction) pair, and any operator who can
+    measure realised error on their own catalog can pick the point they want.
+    That is a fair opponent, and section 3's flat precision curve is not an
+    argument against it. The claim that has to be tested is narrower: the
+    threshold is chosen on the catalog available at tuning time, and the network
+    it runs on is not that catalog.
+
+    So the comparison here is deliberately transitional. The frontier is built on
+    domain A -- for each budget, the most permissive threshold whose realised
+    error on A stays inside it -- and then that same threshold is evaluated on
+    domain B, where nobody got to tune. Against it stands rc-ndn given the same
+    budget and run on B from cold, calibrating on B's own traffic.
+
+    Both arms use exactly the configuration ``exp_risk`` uses, so the rc-ndn
+    numbers here and there are the same measurement.
+    """
+    frontier: Dict[str, object] = {}
+    controlled: Dict[str, object] = {}
+
+    for domain in bench.catalogs:
+        per_threshold = {}
+        for threshold in THRESHOLD_POINTS:
+            config = base_config(domain, strategy="gs-ndn", threshold=threshold,
+                                 n_edges=8)
+            per_threshold[str(threshold)] = aggregate(bench.metrics(config, seeds))
+        frontier[domain] = per_threshold
+
+        per_epsilon = {}
+        for epsilon in EPSILON_POINTS:
+            config = base_config(domain, strategy="rc-ndn", epsilon=epsilon, n_edges=8)
+            per_epsilon[str(epsilon)] = aggregate(bench.metrics(config, seeds))
+        controlled[domain] = per_epsilon
+
+        print(f"\n--- {domain}: fixed-threshold frontier ---")
+        for threshold, stats in per_threshold.items():
+            print(f"    Th={threshold:<5} realised {stats['risk_realised_error']['mean']:.4f}"
+                  f"  isr {stats['isr']['mean']:.3f}")
+        print(f"--- {domain}: rc-ndn, live ---")
+        for epsilon, stats in per_epsilon.items():
+            print(f"    eps={epsilon:<5} realised {stats['risk_realised_error']['mean']:.4f}"
+                  f"  isr {stats['isr']['mean']:.3f}")
+
+    transfer = _transfer_analysis(frontier, controlled)
+    for pair, rows in transfer.items():
+        print(f"\n--- transfer: {pair} ---")
+        for row in rows:
+            if row["tuned_threshold"] is None:
+                print(f"    eps={row['epsilon']:<5} no threshold meets this budget on the tuning domain")
+                continue
+            print(
+                f"    eps={row['epsilon']:<5} Th*={row['tuned_threshold']:<5} "
+                f"transferred err {row['transferred_error']:.4f} isr {row['transferred_isr']:.3f} "
+                f"[{'held' if row['transferred_within_budget'] else 'OVER'}]  |  "
+                f"rc-ndn err {row['rc_error']:.4f} isr {row['rc_isr']:.3f}  "
+                f"-> {row['verdict']}"
+            )
+    return {"frontier": frontier, "rc_ndn": controlled, "transfer": transfer}
+
+
+def _tune_threshold(per_threshold: Dict[str, object], epsilon: float):
+    """The most permissive threshold whose realised error stays inside budget.
+
+    Most permissive rather than safest, because that is what an operator tuning
+    on their own catalog would pick: the budget is a constraint, and satisfaction
+    is what they are maximising subject to it. Ties in error are broken by
+    the lower threshold for the same reason.
+    """
+    feasible = [
+        (float(t), stats) for t, stats in per_threshold.items()
+        if stats["risk_realised_error"]["mean"] <= epsilon
+    ]
+    if not feasible:
+        return None, None
+    threshold, stats = min(feasible, key=lambda pair: pair[0])
+    return threshold, stats
+
+
+def _transfer_analysis(
+    frontier: Dict[str, object], controlled: Dict[str, object]
+) -> Dict[str, List[Dict[str, object]]]:
+    """Tune on one domain, evaluate on the other, and score the outcome."""
+    out: Dict[str, List[Dict[str, object]]] = {}
+    domains = list(frontier)
+    for tune in domains:
+        for evaluate in domains:
+            if tune == evaluate:
+                continue
+            rows: List[Dict[str, object]] = []
+            for epsilon in EPSILON_POINTS:
+                threshold, tuned_stats = _tune_threshold(frontier[tune], epsilon)
+                rc = controlled[evaluate][str(epsilon)]
+                row: Dict[str, object] = {
+                    "epsilon": epsilon,
+                    "tuned_threshold": threshold,
+                    "rc_error": rc["risk_realised_error"]["mean"],
+                    "rc_error_ci95": rc["risk_realised_error"]["ci95"],
+                    "rc_isr": rc["isr"]["mean"],
+                    "rc_isr_ci95": rc["isr"]["ci95"],
+                    "rc_within_budget": rc["risk_realised_error"]["mean"] <= epsilon,
+                }
+                if threshold is None:
+                    row.update({
+                        "verdict": "no feasible threshold on tuning domain",
+                    })
+                    rows.append(row)
+                    continue
+
+                evaluated = frontier[evaluate][str(threshold)]
+                row.update({
+                    "tuning_domain_error": tuned_stats["risk_realised_error"]["mean"],
+                    "tuning_domain_isr": tuned_stats["isr"]["mean"],
+                    "transferred_error": evaluated["risk_realised_error"]["mean"],
+                    "transferred_error_ci95": evaluated["risk_realised_error"]["ci95"],
+                    "transferred_isr": evaluated["isr"]["mean"],
+                    "transferred_isr_ci95": evaluated["isr"]["ci95"],
+                    "transferred_within_budget":
+                        evaluated["risk_realised_error"]["mean"] <= epsilon,
+                    "verdict": _verdict(
+                        rc["risk_realised_error"]["mean"], rc["isr"]["mean"],
+                        evaluated["risk_realised_error"]["mean"], evaluated["isr"]["mean"],
+                    ),
+                })
+                rows.append(row)
+            out[f"{tune}->{evaluate}"] = rows
+    return out
+
+
+def _verdict(rc_error: float, rc_isr: float, other_error: float, other_isr: float) -> str:
+    """Where rc-ndn sits relative to the transferred threshold on both axes.
+
+    Stated as dominance rather than as a single score, because the two axes
+    trade against each other and collapsing them would hide which one moved.
+    """
+    better_error = rc_error < other_error
+    better_isr = rc_isr > other_isr
+    if better_error and better_isr:
+        return "rc-ndn dominates"
+    if not better_error and not better_isr:
+        return "transferred threshold dominates"
+    return "neither dominates (trade)"
 
 
 def exp_rate(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
@@ -337,33 +500,155 @@ def exp_risk(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
     return out
 
 
-def exp_churn(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
-    """Producers that move. The setting where feedback is the only signal.
+CHURN_STRATEGIES = ("saf+es", "gs-ndn", "gs-ndn-no-verify", "rc-ndn", "rc-ndn-aci")
 
-    A relocation changes the right answer without changing any similarity
-    score, so re-encoding cannot detect it. Only a producer's refusal can.
+
+def exp_churn(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
+    """Producers that move, and producers that quietly narrow what they answer.
+
+    Two arms, because the first one on its own turned out to answer a different
+    question than it was asked.
+
+    ``move``   the original: departures and relocations. A relocation changes the
+               right answer without changing any similarity score, which is why
+               it was expected to be where feedback earns its cost. It is not,
+               and :mod:`gsndn.churn` now says why -- withdrawing the route also
+               invalidates every Embedding Store entry that pointed at it, so
+               the stale mapping is destroyed by the event rather than caught by
+               anybody, uniformly for every strategy.
+
+    ``drift``  schema drift: no route event at all, no invalidation, no score
+               change. A producer simply stops recognising some of the wordings
+               it used to answer, and a producer's live refusal is the only thing
+               in the system that can notice. This is the arm the original was
+               missing.
+
+    What drift should move is wasted work rather than satisfaction. A wording its
+    producer has stopped answering cannot be satisfied by anyone, so no strategy
+    recovers it; what separates them is how long they keep spending a round trip
+    to be told no. ``producer_refusal_rate`` is that quantity.
     """
     intervals = (0.0, 10.0, 5.0, 2.0, 1.0)
+    arms = {
+        "move": lambda interval: ChurnConfig(interval_s=interval),
+        "drift": lambda interval: ChurnConfig(interval_s=interval, drift_share=1.0),
+    }
     out: Dict[str, object] = {}
     for domain in bench.catalogs:
-        rows: Dict[str, object] = {}
-        for strategy in ("saf+es", "gs-ndn", "gs-ndn-no-verify", "rc-ndn"):
-            per_interval = {}
-            for interval in intervals:
-                config = base_config(
-                    domain, strategy=strategy, epsilon=0.2, n_edges=8,
-                    churn=ChurnConfig(interval_s=interval),
+        per_arm: Dict[str, object] = {}
+        for arm, make_churn in arms.items():
+            rows: Dict[str, object] = {}
+            for strategy in CHURN_STRATEGIES:
+                per_interval = {}
+                for interval in intervals:
+                    config = base_config(
+                        domain, strategy=strategy, epsilon=0.2, n_edges=8,
+                        churn=make_churn(interval),
+                    )
+                    per_interval[str(interval)] = aggregate(bench.metrics(config, seeds))
+                rows[strategy] = per_interval
+            per_arm[arm] = rows
+            print(f"\n--- {domain}: producer churn ({arm}) ---")
+            for strategy, per_interval in rows.items():
+                isr = "  ".join(
+                    f"{i}s:{s['isr']['mean']:.3f}" for i, s in per_interval.items()
                 )
-                per_interval[str(interval)] = aggregate(bench.metrics(config, seeds))
-            rows[strategy] = per_interval
-        out[domain] = rows
-        print(f"\n--- {domain}: producer churn ---")
-        for strategy, per_interval in rows.items():
-            cells = "  ".join(
-                f"{i}s:{s['isr']['mean']:.3f}" for i, s in per_interval.items()
-            )
-            print(f"  {strategy:<18} ISR  {cells}")
+                print(f"  {strategy:<18} ISR      {isr}")
+            for strategy, per_interval in rows.items():
+                refusals = "  ".join(
+                    f"{i}s:{s['producer_refusal_rate']['mean']:.3f}"
+                    for i, s in per_interval.items()
+                )
+                print(f"  {strategy:<18} refused  {refusals}")
+        out[domain] = per_arm
     return out
+
+
+def exp_drift_paired(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
+    """The drift arm's separations, tested pairwise on identical seeds.
+
+    ``exp_churn`` reports each strategy's mean with its own confidence interval,
+    and the differences under schema drift are small enough that those intervals
+    overlap while the underlying difference is real: every arm sees the same
+    workload, the same drift events and the same producers, so the seed-to-seed
+    variation the intervals are made of is shared and cancels. This runs the
+    hardest drift point only, pairs the runs by seed, and reports the
+    distribution of the difference rather than the difference of the means.
+
+    Two baselines, because two different questions are being asked.
+
+    Against ``gs-ndn-no-verify``: does verification pay under an event only a
+    producer refusal can detect? That is the question the move arm could not
+    answer, and the reason this arm exists.
+
+    Against ``rc-ndn``: does an adaptive budget beat a fixed one when the
+    distribution moves under it? Adaptive Conformal Inference is motivated
+    entirely by exchangeability failing, and schema drift is exchangeability
+    failing, so this is the arm where it should show if it shows anywhere.
+    """
+    baselines = ("gs-ndn-no-verify", "rc-ndn")
+    arms = ("saf+es", "gs-ndn", "gs-ndn-no-verify", "rc-ndn", "rc-ndn-aci")
+    out: Dict[str, object] = {}
+    for domain in bench.catalogs:
+        per_strategy: Dict[str, List[Dict[str, float]]] = {}
+        for strategy in arms:
+            config = base_config(
+                domain, strategy=strategy, epsilon=0.2, n_edges=8,
+                churn=ChurnConfig(interval_s=1.0, drift_share=1.0),
+            )
+            per_strategy[strategy] = bench.metrics(config, seeds)
+
+        against: Dict[str, object] = {}
+        for baseline in baselines:
+            rows: Dict[str, object] = {}
+            for strategy in arms:
+                if strategy == baseline:
+                    continue
+                entry: Dict[str, object] = {}
+                for metric in ("isr", "producer_refusal_rate", "risk_realised_error"):
+                    deltas = [
+                        a[metric] - b[metric]
+                        for a, b in zip(per_strategy[strategy], per_strategy[baseline])
+                    ]
+                    entry[metric] = _paired(deltas)
+                rows[strategy] = entry
+            against[baseline] = rows
+
+            print(f"\n--- {domain}: schema drift at 1 s, paired against {baseline} ---")
+            for strategy, entry in rows.items():
+                isr = entry["isr"]
+                refused = entry["producer_refusal_rate"]
+                print(
+                    f"  {strategy:<18} ISR {isr['mean']:+.4f}±{isr['ci95']:.4f} "
+                    f"[{'resolved' if isr['resolved'] else 'not resolved'}]  "
+                    f"refusals {refused['mean']:+.4f}±{refused['ci95']:.4f} "
+                    f"[{'resolved' if refused['resolved'] else 'not resolved'}]  "
+                    f"wins {isr['wins']}/{isr['n']}"
+                )
+        out[domain] = against
+    return out
+
+
+def _paired(deltas: Sequence[float]) -> Dict[str, float]:
+    """Mean paired difference, its interval, and how often it had the sign."""
+    import math
+
+    n = len(deltas)
+    mean = sum(deltas) / n
+    if n > 1:
+        variance = sum((d - mean) ** 2 for d in deltas) / (n - 1)
+        ci95 = 1.96 * math.sqrt(variance / n)
+    else:
+        ci95 = 0.0
+    return {
+        "mean": mean,
+        "ci95": ci95,
+        "n": n,
+        "wins": sum(1 for d in deltas if d > 0),
+        # Does the interval exclude zero -- i.e. is the sign of this difference
+        # something twenty seeds actually settle?
+        "resolved": abs(mean) > ci95,
+    }
 
 
 def exp_poisoning(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
@@ -398,12 +683,22 @@ def exp_heterogeneity(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
     Mappings pool across the boundary because a route that served a name serves
     it however anyone chose to ask. Scores do not: 0.62 from MiniLM and 0.62
     from a character n-gram model are not the same measurement.
+
+    That argument was previously asserted and not tested: the experiment ran only
+    the arm that refuses to pool, so "graceful degradation" had nothing to be
+    graceful *against*. ``rc-ndn-naive-mix`` is the missing baseline -- the same
+    controller with the guard removed, gossiping scores across the encoder
+    boundary as though they were commensurable.
+
+    It has to be a risk-controlled arm. GS-NDN gossips mappings and no scores at
+    all, so there is nothing for a naive version of it to mix; the guard exists
+    on the evidence path, and only the evidence path can be measured with it off.
     """
     shares = (0.0, 0.25, 0.5)
     out: Dict[str, object] = {}
     for domain in bench.catalogs:
         rows: Dict[str, object] = {}
-        for strategy in ("gs-ndn", "rc-ndn"):
+        for strategy in ("gs-ndn", "rc-ndn", "rc-ndn-naive-mix"):
             per_share = {}
             for share in shares:
                 config = base_config(
@@ -416,20 +711,149 @@ def exp_heterogeneity(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
         out[domain] = rows
         print(f"\n--- {domain}: encoder heterogeneity ---")
         for strategy, per_share in rows.items():
-            cells = "  ".join(
-                f"{k}:{v['isr']['mean']:.3f}" for k, v in per_share.items()
+            isr = "  ".join(f"{k}:{v['isr']['mean']:.3f}" for k, v in per_share.items())
+            print(f"  {strategy:<18} ISR       {isr}")
+        for strategy, per_share in rows.items():
+            err = "  ".join(
+                f"{k}:{v['risk_realised_error']['mean']:.4f}" for k, v in per_share.items()
             )
-            print(f"  {strategy:<10} ISR  {cells}")
+            print(f"  {strategy:<18} realised  {err}")
+        for strategy, per_share in rows.items():
+            evidence = "  ".join(
+                f"{k}:{v['gossip_evidence_dropped_encoder']['mean']:.0f}"
+                f"/{v['gossip_evidence_mixed_encoder']['mean']:.0f}"
+                for k, v in per_share.items()
+            )
+            print(f"  {strategy:<18} dropped/mixed  {evidence}")
+    return out
+
+
+def exp_ontology(bench: Bench, seeds: Sequence[int]) -> Dict[str, object]:
+    """Are the invented synonyms easier than the ones somebody standardised?
+
+    The catalogs are generated from a lexicon we wrote, so the recognition
+    results could in principle be measuring our lexicon rather than the encoder.
+    The grounded catalogs add a seventh rewording per service taken from Brick
+    Schema, SAREF, Project Haystack or W3C SSN/SOSA where those vocabularies name
+    the quantity at all -- see :mod:`gsndn.datasets.ontology` for the table and
+    for what it does not fix.
+
+    The headline measurement is deterministic and needs no seeds, because it is
+    a property of the encoder and the names rather than of the simulation: for
+    every reworded name, does the true service come out top of a cosine search
+    over the FIB, and at what score. Grouping that by rewrite family puts the
+    ontology-sourced wordings directly against the invented ones on the same
+    catalog and the same encoder.
+
+    ``ontology`` counts only the services a published vocabulary actually names.
+    ``ontology-fallback`` is the rest of that family -- clinical metrics and bus
+    timetables, which no building or sensing ontology models -- and is reported
+    separately rather than averaged in, because averaging it in would let our own
+    lexicon flatter a number labelled as standardised.
+    """
+    out: Dict[str, object] = {}
+    for domain in datasets.GROUNDED_DOMAINS:
+        catalog = datasets.load(domain)
+        backend = PrecomputedBackend(
+            ROOT / "data" / "embeddings" / f"{domain}.{bench.model}.npz"
+        )
+        index = NameIndex(backend, catalog.canonical_names)
+        families = catalog.metadata["rewrite_family"]
+
+        # Only some services have a standardised wording at all, and they are
+        # not a random sample -- they are the environmental ones, which are also
+        # the ones the invented families handle most easily. Comparing the
+        # ontology family against invented families computed over *all* services
+        # would therefore compare two different service sets and call the
+        # difference an encoder result. Every family is scored twice: over
+        # everything, and restricted to the services a published vocabulary
+        # actually names. The restricted column is the comparable one.
+        category = {s.canonical: s.category for s in catalog.services}
+        grounded_service = {
+            canonical for canonical, key in category.items()
+            if datasets.ontology.terms_for(key)
+        }
+
+        def blank() -> Dict[str, float]:
+            return {"n": 0, "rank1": 0, "true_score": 0.0, "best_score": 0.0}
+
+        per_family: Dict[str, Dict[str, float]] = {}
+        restricted: Dict[str, Dict[str, float]] = {}
+        for interest in catalog.by_kind(datasets.VARIANT):
+            family = families.get(interest.name, "unknown")
+            query = backend.encode([interest.name])[0]
+            scores = index.similarities(query)
+            best = int(scores.argmax())
+            hit = int(index.names[best] == interest.expected)
+            true_score = float(scores[index.names.index(interest.expected)])
+
+            targets = [per_family.setdefault(family, blank())]
+            if interest.expected in grounded_service:
+                targets.append(restricted.setdefault(family, blank()))
+            for bucket in targets:
+                bucket["n"] += 1
+                bucket["rank1"] += hit
+                bucket["true_score"] += true_score
+                bucket["best_score"] += float(scores[best])
+
+        def summarise_families(source: Dict[str, Dict[str, float]]):
+            return {
+                family: {
+                    "n": data["n"],
+                    "rank1": data["rank1"] / data["n"],
+                    "mean_true_score": data["true_score"] / data["n"],
+                    "mean_best_score": data["best_score"] / data["n"],
+                }
+                for family, data in sorted(source.items())
+            }
+
+        rows = summarise_families(per_family)
+        rows_restricted = summarise_families(restricted)
+        out[domain] = {
+            "recognition": rows,
+            "recognition_grounded_services_only": rows_restricted,
+            "coverage": catalog.metadata["ontology"],
+        }
+        print(f"\n--- {domain}: recognition by rewrite family ---")
+        print(f"  {'family':<20} {'all services':>22}   {'grounded services only':>24}")
+        for family, data in rows.items():
+            limited = rows_restricted.get(family)
+            cell = (
+                f"n={limited['n']:<4} rank-1 {limited['rank1']:.3f}"
+                if limited else "--"
+            )
+            print(f"  {family:<20} n={data['n']:<4} rank-1 {data['rank1']:.3f}"
+                  f"  score {data['mean_true_score']:.3f}   {cell}")
+
+    # And end to end, on the grounded catalogs, at the campaign's operating
+    # point. Not comparable line-for-line with section 1's table -- a grounded
+    # catalog has a seventh wording per service and a larger distractor set, so
+    # it is a different dataset -- but it says whether the pipeline behaves at
+    # all on names it did not invent.
+    grounded_bench = Bench(datasets.GROUNDED_DOMAINS, bench.model)
+    end_to_end: Dict[str, object] = {}
+    for domain in datasets.GROUNDED_DOMAINS:
+        rows = {}
+        for strategy in ("saf+es", "gs-ndn", "rc-ndn"):
+            config = base_config(domain, strategy=strategy, epsilon=0.2, n_edges=8)
+            rows[strategy] = aggregate(grounded_bench.metrics(config, seeds))
+        end_to_end[domain] = rows
+        print(f"\n--- {domain}: end to end ---")
+        print(format_table(rows, ("isr", "precision", "risk_realised_error")))
+    out["end_to_end"] = end_to_end
     return out
 
 
 EXPERIMENTS: Dict[str, Callable[[Bench, Sequence[int]], Dict[str, object]]] = {
     "risk": exp_risk,
     "churn": exp_churn,
+    "drift_paired": exp_drift_paired,
     "poisoning": exp_poisoning,
     "heterogeneity": exp_heterogeneity,
     "main": exp_main,
     "threshold": exp_threshold,
+    "threshold_transfer": exp_threshold_transfer,
+    "ontology": exp_ontology,
     "rate": exp_rate,
     "scaling": exp_scaling,
     "convergence": exp_convergence,
